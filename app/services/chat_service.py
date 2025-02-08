@@ -56,12 +56,12 @@ Selalu gunakan Bahasa Indonesia yang sopan dan empatik dalam merespons."""
         ]
 
     async def handle_chat(self, request: ChatRequest, session_id: Optional[str] = None):
-        if not session_id or not self.session_manager.get_session(session_id):
-            session_id = self.session_manager.create_session()
-            session = self.session_manager.get_session(session_id)
+        if not session_id or not await self.session_manager.get_session(session_id):
+            session_id = await self.session_manager.create_session()
+            session = await self.session_manager.get_session(session_id)
             session["is_first_message"] = True
         else:
-            session = self.session_manager.get_session(session_id)
+            session = await self.session_manager.get_session(session_id)
         
         session["history"].append({"role": "user", "content": request.message})
 

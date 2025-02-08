@@ -1,33 +1,35 @@
 from uuid import uuid4
-from datetime import datetime, timedelta
-from app.config import settings
+from datetime import datetime
+from app.services.redis_service import redis_service
 
 class SessionManager:
     def __init__(self):
-        self.sessions = {}
-        self.session_duration = timedelta(minutes=30)  # Session timeout
+        self.redis = redis_service
 
-    def create_session(self) -> str:
+    async def create_session(self) -> str:
         session_id = str(uuid4())
-        self.sessions[session_id] = {
-            "created_at": datetime.now(),
+        session_data = {
+            "created_at": datetime.now().isoformat(),
             "history": [],
-            "report_data": {}  # For storing partial report information
+            "report_data": {}
         }
+        
+        await self.redis.set_session(session_id, session_data)
         return session_id
 
-    def get_session(self, session_id: str):
-        if session_id in self.sessions:
-            # Reset timeout on access
-            self.sessions[session_id]["created_at"] = datetime.now()
-            return self.sessions[session_id]
-        return None
+    async def get_session(self, session_id: str):
+        if not session_id:
+            return None
+            
+        session = await self.redis.get_session(session_id)
+        if session:
+            # Update created_at to extend session
+            session["created_at"] = datetime.now().isoformat()
+            await self.redis.set_session(session_id, session)
+        return session
 
-    def cleanup_sessions(self):
-        now = datetime.now()
-        expired = [sid for sid, session in self.sessions.items() 
-                  if now - session["created_at"] > self.session_duration]
-        for sid in expired:
-            del self.sessions[sid]
+    async def cleanup_sessions(self):
+        # Redis akan otomatis membersihkan sesi yang expired
+        pass
 
 session_manager = SessionManager()
