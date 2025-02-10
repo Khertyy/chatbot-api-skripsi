@@ -215,6 +215,25 @@ Selalu gunakan Bahasa Indonesia yang sopan dan empatik dalam merespons."""
                 session["report_data"][session["current_field"]] = cleaned_message
                 session["current_field"] = None
 
+        # Ekstrak jenis kelamin
+        gender_keywords = {
+            "victim_gender": {
+                "wanita": ["wanita", "perempuan", "cewek", "permpuan"],
+                "pria": ["pria", "laki-laki", "cowok", "laki"]
+            },
+            "perpetrator_gender": {
+                "wanita": ["wanita", "perempuan", "cewek", "permpuan"],
+                "pria": ["pria", "laki-laki", "cowok", "laki"]
+            }
+        }
+        
+        for field in ["victim_gender", "perpetrator_gender"]:
+            if field not in session["report_data"]:
+                for gender, keywords in gender_keywords[field].items():
+                    if any(kw in message_lower for kw in keywords):
+                        session["report_data"][field] = gender.capitalize()
+                        break
+
     def _is_report_complete(self, report_data: dict) -> bool:
         return all(field in report_data for field in self.report_fields)
 
@@ -234,28 +253,31 @@ Selalu gunakan Bahasa Indonesia yang sopan dan empatik dalam merespons."""
         return confirmation
 
     def _get_next_questions(self, session: dict) -> str:
-        # Ambil maksimal 2 pertanyaan berikutnya
-        questions = []
-        priority_fields = [
-            ("victim_name", "Siapa nama korban?"),
-            ("violence_category", "Apa jenis kekerasan yang terjadi?"),
-            ("chronology", "Bisa ceritakan kronologi kejadiannya?"),
-            ("scene", "Di mana lokasi kejadiannya?"),
-            ("date", "Kapan kejadian ini terjadi?")
+        question_flow = [
+            ("victim_name", "Terima kasih telah melapor. Sebelum memulai, boleh saya tahu nama korban yang mengalami kekerasan?"),
+            ("violence_category", "Saya turut prihatin dengan kejadian ini. Bisakah Anda jelaskan jenis kekerasan yang terjadi?\nContoh: Kekerasan fisik, seksual, psikis, penelantaran, atau trafficking."),
+            ("chronology", "Bisa ceritakan secara singkat bagaimana kronologi kejadiannya? (Waktu, tempat, dan apa yang terjadi)"),
+            ("scene", "Di mana tepatnya lokasi kejadian terjadi? (Alamat lengkap atau patokan lokasi)"),
+            ("date", "Kapan peristiwa ini terjadi? (Format: DD/MM/YYYY)"),
+            ("victim_age", "Berapa usia korban saat ini?"),
+            ("victim_gender", "Bisa saya ketahui jenis kelamin korban?"),
+            ("perpetrator_name", "Apakah Anda mengetahui nama pelaku atau hubungannya dengan korban?"),
+            ("reporter_name", "Terima kasih atas informasinya. Terakhir, boleh saya tahu nama lengkap Anda sebagai pelapor?"),
+            ("reporter_phone", "Apa nomor telepon yang bisa kami hubungi untuk follow up?"),
         ]
-        
-        for field, question in priority_fields:
+
+        # Cari pertanyaan berikutnya dengan urutan prioritas
+        for field, question in question_flow:
             if field not in session["report_data"]:
-                questions.append(question)
-                if len(questions) == 2:
-                    break
+                return question
         
-        return "\n".join(questions) if questions else "Ada informasi lain yang ingin Anda tambahkan?"
+        # Jika semua field terisi
+        return "Ada detail lain yang ingin Anda tambahkan untuk melengkapi laporan?"
 
     async def _submit_report(self, session: dict) -> ChatResponse:
         async with aiohttp.ClientSession() as http_session:
             async with http_session.post(
-                "http://129.80.183.54:8000/api/chatbot/report",
+                "http://129.80.183.54/api/chatbot/report",
                 data=session["report_data"]
             ) as response:
                 result = await response.json()

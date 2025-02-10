@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import chatbot
+from app.routers import chatbot, reports
 from app.config import settings
 
 app = FastAPI(title="DP3A Child Protection Chatbot",
@@ -16,3 +16,4 @@ app.add_middleware(
 )
 
 app.include_router(chatbot.router, prefix="/api/v1/chatbot")
+app.include_router(reports.router, prefix="/api/v1/chatbot/reports")
