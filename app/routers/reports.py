@@ -4,6 +4,7 @@ from app.models.schemas import ChatResponse
 from datetime import datetime
 import aiohttp
 import traceback
+from app.config import settings
 
 router = APIRouter()
 
@@ -38,10 +39,11 @@ async def test_report_submission():
         }
 
         async with aiohttp.ClientSession() as http_session:
-            # Mengirim sebagai form-data
+            # Tambahkan parameter ssl=False untuk menonaktifkan verifikasi SSL
             async with http_session.post(
-                "http://129.80.183.54/api/chatbot/report",
-                data=test_data
+                f"{settings.base_api_url}/api/chatbot/report",
+                data=test_data,
+                ssl=False
             ) as response:
                 response_data = await response.json()
                 return {

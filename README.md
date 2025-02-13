@@ -208,13 +208,6 @@ redis-cli FLUSHALL
 
 [MIT License](LICENSE)
 
-## Kontak
-
-Untuk pertanyaan dan dukungan, silakan hubungi:
-
-- Email: [your-email@example.com]
-- Website: [your-website.com]
-
 ## Pengakuan
 
 Proyek ini dikembangkan sebagai bagian dari skripsi untuk Dinas Pemberdayaan Perempuan dan Perlindungan Anak (DP3A) Sulawesi Utara.

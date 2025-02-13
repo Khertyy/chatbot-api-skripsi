@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     gemini_api_key: str
+    base_api_url: str = "https://dpppa-sulutprov.support"  # Base URL saja
     app_env: str = "development"
     api_rate_limit: str | None = None
     

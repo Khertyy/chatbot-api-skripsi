@@ -277,7 +277,7 @@ Selalu gunakan Bahasa Indonesia yang sopan dan empatik dalam merespons."""
     async def _submit_report(self, session: dict) -> ChatResponse:
         async with aiohttp.ClientSession() as http_session:
             async with http_session.post(
-                "http://129.80.183.54/api/chatbot/report",
+                f"{settings.base_api_url}/api/chatbot/report",
                 data=session["report_data"]
             ) as response:
                 result = await response.json()

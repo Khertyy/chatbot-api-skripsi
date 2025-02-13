@@ -179,3 +179,11 @@ top -o %MEM
 # Flush Redis cache
 redis-cli -a your_password FLUSHALL
 ```
+
+## Rekomendasi Production
+
+1. **Load Balancing:** Gunakan Nginx sebagai reverse proxy
+2. **Monitoring:** Implementasi Prometheus + Grafana
+3. **Log Rotation:** Setup logrotate untuk log aplikasi
+4. **Auto Deployment:** CI/CD pipeline dengan GitHub Actions
+5. **Database Persistence:** Pertimbangkan backup harian Redis
