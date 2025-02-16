@@ -70,15 +70,7 @@ Selalu gunakan Bahasa Indonesia yang sopan dan empatik dalam merespons."""
         is_greeting = any(greeting in message_lower for greeting in self.initial_greetings)
         
         if is_greeting and session.get("is_first_message", False):
-            assistant_response = """Hai! Selamat datang di layanan SIPPAT DP3A Sulawesi Utara. 🙏
-
-Saya adalah asisten virtual yang siap membantu Anda. Keselamatan dan kesejahteraan anak-anak adalah prioritas utama kami. Anda bisa berbicara dengan saya tentang:
-
-• Melaporkan kasus kekerasan terhadap anak
-• Mendapatkan informasi tentang perlindungan anak
-• Mencari bantuan dan dukungan
-
-Bagaimana saya bisa membantu Anda hari ini?"""
+            assistant_response = """Hai! 👋 Selamat datang di layanan SIPPAT DP3A Sulawesi Utara. Saya siap membantu Anda, apa yang bisa saya bantu hari ini?"""
             session["is_first_message"] = False
         else:
             # Cek konfirmasi pembuatan laporan
