@@ -70,12 +70,15 @@ Selalu gunakan Bahasa Indonesia yang sopan dan empatik dalam merespons."""
         is_greeting = any(greeting in message_lower for greeting in self.initial_greetings)
         
         if is_greeting and session.get("is_first_message", False):
-            assistant_response = (
-                "Hai! Saya asisten virtual dari SIPPAT DP3A Sulawesi Utara. "
-                "Saya siap membantu Anda dengan informasi seputar perlindungan anak "
-                "atau membantu melaporkan kasus kekerasan terhadap anak. "
-                "Apa yang ingin Anda ketahui?"
-            )
+            assistant_response = """Hai! Selamat datang di layanan SIPPAT DP3A Sulawesi Utara. 🙏
+
+Saya adalah asisten virtual yang siap membantu Anda. Keselamatan dan kesejahteraan anak-anak adalah prioritas utama kami. Anda bisa berbicara dengan saya tentang:
+
+• Melaporkan kasus kekerasan terhadap anak
+• Mendapatkan informasi tentang perlindungan anak
+• Mencari bantuan dan dukungan
+
+Bagaimana saya bisa membantu Anda hari ini?"""
             session["is_first_message"] = False
         else:
             # Cek konfirmasi pembuatan laporan
@@ -86,36 +89,21 @@ Selalu gunakan Bahasa Indonesia yang sopan dan empatik dalam merespons."""
                 session["report_data"] = {}
                 session["current_field"] = None
 
+            # Update data berdasarkan input user
             self._update_report_data(request.message, session)
 
             # Siapkan prompt yang lebih ringkas
-            full_prompt = f"{self.system_prompt}\n\nBerikan respons singkat dan fokus pada 1-2 pertanyaan berikutnya.\n\nPesan pengguna: {request.message}"
-
-            # Proses response dari Gemini
-            async with aiohttp.ClientSession() as http_session:
-                payload = {
-                    "contents": [{
-                        "parts":[{"text": full_prompt}]
-                    }]
-                }
-                
-                async with http_session.post(
-                    f"{self.api_url}?key={self.api_key}",
-                    headers={"Content-Type": "application/json"},
-                    json=payload
-                ) as response:
-                    response_data = await response.json()
-                    assistant_response = response_data["candidates"][0]["content"]["parts"][0]["text"]
-
-            # Modifikasi respons untuk lebih ringkas
             if self._is_report_complete(session["report_data"]):
                 if not session.get("ready_to_submit"):
                     session["ready_to_submit"] = True
                     assistant_response = self._generate_short_confirmation(session["report_data"])
-            elif session.get("report_data"):  # Hanya tambahkan pertanyaan jika sudah mulai melapor
-                next_questions = self._get_next_questions(session)
-                if next_questions:
-                    assistant_response = f"{assistant_response}\n\n{next_questions}"
+            else:
+                # Dapatkan pertanyaan berikutnya
+                next_question = self._get_next_questions(session)
+                if next_question:
+                    assistant_response = next_question
+                else:
+                    assistant_response = "Mohon maaf, saya tidak mengerti. Bisakah Anda mengulangi jawaban Anda?"
 
         session["history"].append({"role": "assistant", "content": assistant_response})
 
@@ -253,26 +241,48 @@ Selalu gunakan Bahasa Indonesia yang sopan dan empatik dalam merespons."""
         return confirmation
 
     def _get_next_questions(self, session: dict) -> str:
+        # Urutan pertanyaan yang lebih natural dan satu per satu
         question_flow = [
-            ("victim_name", "Terima kasih telah melapor. Sebelum memulai, boleh saya tahu nama korban yang mengalami kekerasan?"),
-            ("violence_category", "Saya turut prihatin dengan kejadian ini. Bisakah Anda jelaskan jenis kekerasan yang terjadi?\nContoh: Kekerasan fisik, seksual, psikis, penelantaran, atau trafficking."),
-            ("chronology", "Bisa ceritakan secara singkat bagaimana kronologi kejadiannya? (Waktu, tempat, dan apa yang terjadi)"),
-            ("scene", "Di mana tepatnya lokasi kejadian terjadi? (Alamat lengkap atau patokan lokasi)"),
-            ("date", "Kapan peristiwa ini terjadi? (Format: DD/MM/YYYY)"),
+            ("violence_category", """Saya akan membantu Anda membuat laporan. Mohon beritahu jenis kekerasan yang terjadi:
+
+- Kekerasan Fisik
+- Kekerasan Seksual
+- Kekerasan Psikis
+- Penelantaran
+- Trafficking"""),
+            ("victim_name", "Baik, mohon beritahu nama korban yang mengalami kekerasan. 🙏"),
+            ("date", "Kapan kejadian ini terjadi? (Contoh: 25/03/2024)"),
+            ("scene", "Di mana lokasi kejadian ini terjadi?"),
+            ("chronology", "Mohon ceritakan secara singkat kronologi kejadiannya."),
             ("victim_age", "Berapa usia korban saat ini?"),
-            ("victim_gender", "Bisa saya ketahui jenis kelamin korban?"),
-            ("perpetrator_name", "Apakah Anda mengetahui nama pelaku atau hubungannya dengan korban?"),
-            ("reporter_name", "Terima kasih atas informasinya. Terakhir, boleh saya tahu nama lengkap Anda sebagai pelapor?"),
-            ("reporter_phone", "Apa nomor telepon yang bisa kami hubungi untuk follow up?"),
+            ("victim_gender", "Mohon beritahu jenis kelamin korban (Pria/Wanita)."),
+            ("victim_phone", "Boleh saya tahu nomor telepon korban yang bisa dihubungi?"),
+            ("victim_address", "Di mana alamat tempat tinggal korban saat ini?"),
+            ("victim_description", "Mohon berikan deskripsi singkat tentang korban."),
+            ("perpetrator_name", "Siapa nama pelaku dalam kejadian ini?"),
+            ("perpetrator_age", "Berapa usia pelaku?"),
+            ("perpetrator_gender", "Apa jenis kelamin pelaku (Pria/Wanita)?"),
+            ("perpetrator_description", "Mohon berikan deskripsi singkat tentang pelaku."),
+            ("reporter_name", "Boleh saya tahu nama Anda sebagai pelapor?"),
+            ("reporter_phone", "Nomor telepon yang bisa kami hubungi?"),
+            ("reporter_address", "Di mana alamat tempat tinggal Anda?"),
+            ("reporter_relationship_between", """Apa hubungan Anda dengan korban?
+
+- Keluarga
+- Tetangga
+- Teman
+- Saksi
+- Tidak Dikenal"""),
         ]
 
-        # Cari pertanyaan berikutnya dengan urutan prioritas
+        # Cari field yang belum terisi dan berikan pertanyaan berikutnya
         for field, question in question_flow:
             if field not in session["report_data"]:
+                session["current_field"] = field  # Tandai field yang sedang ditanyakan
                 return question
         
-        # Jika semua field terisi
-        return "Ada detail lain yang ingin Anda tambahkan untuk melengkapi laporan?"
+        # Jika semua field sudah terisi
+        return None
 
     async def _submit_report(self, session: dict) -> ChatResponse:
         async with aiohttp.ClientSession() as http_session:
@@ -295,5 +305,7 @@ Selalu gunakan Bahasa Indonesia yang sopan dan empatik dalam merespons."""
 
     def _determine_next_steps(self, session: dict) -> list[str]:
         if session.get("ready_to_submit"):
-            return ["Konfirmasi laporan"]
-        return ["Jawab pertanyaan berikutnya"]
+            return ["Konfirmasi pengiriman laporan"]
+        elif session.get("current_field"):
+            return [f"Jawab pertanyaan tentang {self.report_fields[session['current_field']]}"]
+        return ["Mulai proses pelaporan"]

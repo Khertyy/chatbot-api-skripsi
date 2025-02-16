@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
 from app.services.chat_service import ChatService
 from app.models.schemas import ChatRequest, ChatResponse
 from app.services.session_manager import session_manager
@@ -9,14 +9,28 @@ router = APIRouter()
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(
     request: ChatRequest, 
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    response: Response
 ):
+    # Tambahkan header CORS secara eksplisit
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    
     service = ChatService()
     response = await service.handle_chat(request, request.session_id)
     
     background_tasks.add_task(session_manager.cleanup_sessions)
     
     return response
+
+# Tambahkan endpoint OPTIONS untuk pre-flight requests
+@router.options("/chat")
+async def chat_options(response: Response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return {"message": "OK"}
 
 @router.get("/debug/session/{session_id}")
 async def get_session_debug(session_id: str):
