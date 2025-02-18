@@ -6,12 +6,26 @@ from app.services.session_manager import session_manager
 from typing import Optional
 from datetime import datetime
 import re
+import logging
+import sys
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 class ChatService:
     def __init__(self):
         self.api_key = settings.gemini_api_key
         self.api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent"
         self.session_manager = session_manager
+        logger.info("ChatService initialized with API URL: %s", self.api_url)
         self.system_prompt = """Anda adalah asisten spesialis perlindungan anak dari SIPPAT (Sistem Informasi Pelaporan Kekerasan Terhadap Anak) DP3A Sulawesi Utara.
 
 Tugas utama Anda:
@@ -56,7 +70,8 @@ Selalu berikan respons yang membantu dan mendukung."""
             "reporter_relationship_between": "Hubungan dengan Korban"
         }
         self.initial_greetings = [
-            "hai", "halo", "hi", "hello", "selamat"
+            "hai", "halo", "hi", "hello", "selamat pagi", "selamat siang", 
+            "selamat sore", "selamat malam"
         ]
         self.report_keywords = [
             "lapor", "laporkan", "melapor", "buat laporan", "membuat laporan",
@@ -116,12 +131,12 @@ Selalu berikan respons yang membantu dan mendukung."""
         if "report_data" not in session:
             session["report_data"] = {}
 
-        # Cek jika ini adalah sapaan awal
-        is_greeting = any(greeting in message_lower for greeting in self.initial_greetings)
+        # Cek jika ini adalah sapaan awal - hanya jika pesan HANYA berisi sapaan
+        is_greeting = message_lower in self.initial_greetings or message_lower.strip() in self.initial_greetings
         wants_to_report = any(keyword in message_lower for keyword in self.report_keywords)
         
-        # Reset session jika user memulai percakapan baru
-        if is_greeting:
+        # Reset session HANYA jika ini adalah sapaan awal dan bukan dalam mode pelaporan
+        if is_greeting and not session.get("reporting_mode"):
             session["is_first_message"] = True
             session["reporting_mode"] = False
             session["current_field"] = None
@@ -141,15 +156,23 @@ Selalu berikan respons yang membantu dan mendukung."""
             session["reporting_mode"] = True
             session["current_field"] = "violence_category"
             session["report_data"] = {}  # Reset report data
-            response_text = [
-                "Baik, saya akan membantu Anda membuat laporan. Mohon beritahu jenis kekerasan yang terjadi:",
-                "- Kekerasan Fisik",
-                "- Kekerasan Seksual",
-                "- Kekerasan Psikis",
-                "- Penelantaran",
-                "- Trafficking"
-            ]
-            assistant_response = " ".join(response_text)
+            
+            # Cek apakah jenis kekerasan sudah disebutkan dalam pesan
+            violence_detected = self._detect_violence_category(message_lower)
+            if violence_detected:
+                session["report_data"]["violence_category"] = violence_detected
+                session["current_field"] = "victim_name"  # Lanjut ke pertanyaan berikutnya
+                assistant_response = """Terima kasih atas informasinya. Untuk melanjutkan proses pelaporan, boleh saya tahu nama korban yang mengalami kekerasan? Kami akan menjaga kerahasiaan identitas dengan sangat baik. 🙏"""
+            else:
+                response_text = [
+                    "Baik, saya akan membantu Anda membuat laporan. Mohon beritahu jenis kekerasan yang terjadi:",
+                    "- Kekerasan Fisik",
+                    "- Kekerasan Seksual",
+                    "- Kekerasan Psikis",
+                    "- Penelantaran",
+                    "- Trafficking"
+                ]
+                assistant_response = " ".join(response_text)
 
         else:
             if session.get("reporting_mode"):
@@ -207,36 +230,31 @@ Selalu berikan respons yang membantu dan mendukung."""
         )
 
     def _update_report_data(self, message: str, session: dict):
-        message_lower = message.lower()
-        current_field = session.get("current_field")
-        
-        # Jika ada field yang sedang aktif, coba update berdasarkan field tersebut
-        if current_field:
-            # Khusus untuk violence_category, cek kata kunci spesifik
-            if current_field == "violence_category":
-                categories = {
-                    "kekerasan fisik": ["fisik", "pukul", "tendang", "aniaya"],
-                    "kekerasan seksual": ["seksual", "perkosa", "leceh", "cabul"],
-                    "kekerasan psikis": ["psikis", "mental", "ancam", "intimidasi"],
-                    "penelantaran": ["telantar", "tidak diurus"],
-                    "trafficking": ["trafficking", "perdagangan", "eksploitasi"]
-                }
-                
-                for category, keywords in categories.items():
-                    if any(keyword in message_lower for keyword in keywords):
-                        session["report_data"][current_field] = category
-                        session["current_field"] = None
-                        return
+        try:
+            message_lower = message.lower()
+            current_field = session.get("current_field")
+            logger.info("Updating report data for field: %s with message: %s", current_field, message)
             
-            # Untuk field lainnya, terima input langsung
-            cleaned_message = message.strip()
-            if len(cleaned_message) > 2:
-                session["report_data"][current_field] = cleaned_message
-                session["current_field"] = None
+            if current_field:
+                if current_field == "violence_category":
+                    violence_category = self._detect_violence_category(message_lower)
+                    if violence_category:
+                        session["report_data"][current_field] = violence_category
+                        session["current_field"] = None
+                        logger.info("Updated violence category to: %s", violence_category)
+                        return
                 
-                # Cek apakah semua field sudah terisi
-                if self._is_report_complete(session["report_data"]):
-                    session["ready_to_submit"] = True
+                cleaned_message = message.strip()
+                if len(cleaned_message) > 2:
+                    session["report_data"][current_field] = cleaned_message
+                    session["current_field"] = None
+                    logger.info("Updated field %s with value: %s", current_field, cleaned_message)
+                    
+                    if self._is_report_complete(session["report_data"]):
+                        session["ready_to_submit"] = True
+                        logger.info("Report is complete and ready to submit")
+        except Exception as e:
+            logger.exception("Error updating report data: %s", str(e))
 
     def _is_report_complete(self, report_data: dict) -> bool:
         return all(field in report_data for field in self.report_fields)
@@ -303,30 +321,111 @@ Selalu berikan respons yang membantu dan mendukung."""
         # Jika semua field sudah terisi
         return None
 
+    def _clean_report_data(self, report_data: dict) -> dict:
+        """Membersihkan dan memformat data laporan"""
+        try:
+            logger.info("Cleaning report data before submission")
+            
+            # Helper function untuk ekstrak angka
+            def extract_number(text: str) -> str:
+                numbers = re.findall(r'\d+', text)
+                return numbers[0] if numbers else "0"
+            
+            # Helper function untuk ekstrak gender
+            def extract_gender(text: str) -> str:
+                text_lower = text.lower()
+                if any(word in text_lower for word in ["pria", "laki", "cowok", "pria"]):
+                    return "Pria"
+                elif any(word in text_lower for word in ["wanita", "perempuan", "cewek"]):
+                    return "Wanita"
+                return "Tidak Diketahui"
+
+            # Helper function untuk ekstrak tanggal
+            def extract_date(text: str) -> str:
+                """Ekstrak dan format tanggal ke YYYY-MM-DD"""
+                text_lower = text.lower()
+                
+                # Coba ekstrak pola tanggal DD/MM/YYYY atau DD-MM-YYYY
+                date_pattern = r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})'
+                match = re.search(date_pattern, text)
+                if match:
+                    day, month, year = match.groups()
+                    return f"{year}-{int(month):02d}-{int(day):02d}"
+                
+                # Coba ekstrak tahun, bulan, dan tanggal dari teks
+                year_pattern = r'20\d{2}'
+                year_match = re.search(year_pattern, text)
+                
+                months = {
+                    'januari': '01', 'februari': '02', 'maret': '03', 'april': '04',
+                    'mei': '05', 'juni': '06', 'juli': '07', 'agustus': '08',
+                    'september': '09', 'oktober': '10', 'november': '11', 'desember': '12',
+                    'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
+                    'mei': '05', 'jun': '06', 'jul': '07', 'agu': '08',
+                    'sep': '09', 'okt': '10', 'nov': '11', 'des': '12'
+                }
+                
+                if year_match:
+                    year = year_match.group()
+                    # Cari bulan
+                    month = '01'  # default
+                    for month_name, month_num in months.items():
+                        if month_name in text_lower:
+                            month = month_num
+                            break
+                    
+                    # Cari tanggal
+                    day_pattern = r'\b(\d{1,2})\b'
+                    day_matches = re.findall(day_pattern, text)
+                    day = '01'  # default
+                    if day_matches:
+                        for d in day_matches:
+                            if 1 <= int(d) <= 31:
+                                day = f"{int(d):02d}"
+                                break
+                    
+                    return f"{year}-{month}-{day}"
+                
+                # Jika tidak bisa mengekstrak tanggal, gunakan tanggal hari ini
+                today = datetime.now()
+                logger.warning(f"Could not extract date from '{text}', using today's date")
+                return today.strftime("%Y-%m-%d")
+
+            cleaned_data = {
+                "violence_category": report_data["violence_category"].title(),
+                "chronology": report_data["chronology"].strip(),
+                "date": extract_date(report_data["date"]),
+                "scene": report_data["scene"].strip(),
+                "victim_name": report_data["victim_name"].split("adalah")[-1].strip(),
+                "victim_phone": report_data["victim_phone"].split("adalah")[-1].strip(),
+                "victim_address": report_data["victim_address"].split("di")[-1].strip(),
+                "victim_age": extract_number(report_data["victim_age"]),
+                "victim_gender": extract_gender(report_data["victim_gender"]),
+                "victim_description": report_data["victim_description"].strip(),
+                "perpetrator_name": report_data["perpetrator_name"].split("adalah")[-1].strip(),
+                "perpetrator_age": extract_number(report_data["perpetrator_age"]),
+                "perpetrator_gender": extract_gender(report_data["perpetrator_gender"]),
+                "perpetrator_description": report_data["perpetrator_description"].strip(),
+                "reporter_name": report_data["reporter_name"].split("adalah")[-1].strip(),
+                "reporter_phone": report_data["reporter_phone"].split("adalah")[-1].strip(),
+                "reporter_address": report_data["reporter_address"].split("di")[-1].strip(),
+                "reporter_relationship_between": report_data["reporter_relationship_between"].split("adalah")[-1].strip().title()
+            }
+
+            logger.info("Cleaned report data: %s", cleaned_data)
+            return cleaned_data
+        except Exception as e:
+            logger.exception("Error cleaning report data: %s", str(e))
+            return report_data
+
     async def _submit_report(self, session: dict) -> ChatResponse:
         """Submit laporan ke endpoint backend"""
         try:
-            # Format data sesuai dengan format yang diharapkan
-            report_data = {
-                "violence_category": session["report_data"]["violence_category"].title(),
-                "chronology": session["report_data"]["chronology"],
-                "date": session["report_data"]["date"],
-                "scene": session["report_data"]["scene"],
-                "victim_name": session["report_data"]["victim_name"],
-                "victim_phone": session["report_data"]["victim_phone"],
-                "victim_address": session["report_data"]["victim_address"],
-                "victim_age": str(session["report_data"]["victim_age"]),
-                "victim_gender": session["report_data"]["victim_gender"].title(),
-                "victim_description": session["report_data"]["victim_description"],
-                "perpetrator_name": session["report_data"]["perpetrator_name"],
-                "perpetrator_age": str(session["report_data"]["perpetrator_age"]),
-                "perpetrator_gender": session["report_data"]["perpetrator_gender"].title(),
-                "perpetrator_description": session["report_data"]["perpetrator_description"],
-                "reporter_name": session["report_data"]["reporter_name"],
-                "reporter_phone": session["report_data"]["reporter_phone"],
-                "reporter_address": session["report_data"]["reporter_address"],
-                "reporter_relationship_between": session["report_data"]["reporter_relationship_between"].title()
-            }
+            # Bersihkan dan format data sebelum dikirim
+            report_data = self._clean_report_data(session["report_data"])
+
+            logger.info("Submitting report with cleaned data: %s", report_data)
+            logger.info("Submitting to URL: %s", f"{settings.base_api_url}/api/chatbot/report")
 
             headers = {
                 "Content-Type": "application/json",
@@ -338,14 +437,18 @@ Selalu berikan respons yang membantu dan mendukung."""
                     f"{settings.base_api_url}/api/chatbot/report",
                     json=report_data,
                     headers=headers,
-                    ssl=False  # Tambahkan ini jika ada masalah SSL
+                    ssl=False
                 ) as response:
                     response_data = await response.json()
+                    logger.info("Received response with status %d: %s", response.status, response_data)
                     
                     if response.status == 200 and response_data.get("success", False):
                         response_message = f"Laporan berhasil dibuat dengan nomor tiket: {response_data.get('ticket_number', 'N/A')}"
+                        logger.info("Report submitted successfully with ticket: %s", response_data.get('ticket_number'))
                     else:
                         error_detail = response_data.get("detail", "Unknown error")
+                        logger.error("Error submitting report: %s", error_detail)
+                        logger.error("Full response: %s", response_data)
                         raise Exception(f"Error from server: {error_detail}")
 
                     return ChatResponse(
@@ -355,7 +458,8 @@ Selalu berikan respons yang membantu dan mendukung."""
                         requires_follow_up=False
                     )
         except Exception as e:
-            print(f"Error submitting report: {str(e)}")  # Untuk debugging
+            logger.exception("Exception while submitting report: %s", str(e))
+            logger.error("Session data: %s", session)
             return ChatResponse(
                 response=f"Maaf, terjadi kesalahan dalam pembuatan laporan: {str(e)}. Silakan coba lagi nanti.",
                 session_id=session.get("session_id"),
@@ -371,3 +475,19 @@ Selalu berikan respons yang membantu dan mendukung."""
                 return [f"Jawab pertanyaan tentang {self.report_fields[session['current_field']]}"]
             return ["Lanjutkan menjawab pertanyaan"]
         return ["Pilih layanan yang dibutuhkan"]
+
+    def _detect_violence_category(self, message: str) -> str | None:
+        """Deteksi kategori kekerasan dari pesan user"""
+        categories = {
+            "kekerasan fisik": ["kekerasan fisik", "fisik", "pukul", "tendang", "aniaya", "tampar", "siksa"],
+            "kekerasan seksual": ["kekerasan seksual", "seksual", "perkosa", "leceh", "cabul"],
+            "kekerasan psikis": ["kekerasan psikis", "psikis", "mental", "ancam", "intimidasi"],
+            "penelantaran": ["penelantaran", "telantar", "tidak diurus"],
+            "trafficking": ["trafficking", "perdagangan", "eksploitasi"]
+        }
+        
+        for category, keywords in categories.items():
+            if any(keyword in message.lower() for keyword in keywords):
+                return category
+        
+        return None
