@@ -9,6 +9,7 @@ class SessionManager:
     async def create_session(self) -> str:
         session_id = str(uuid4())
         session_data = {
+            "session_id": session_id,
             "created_at": datetime.now().isoformat(),
             "history": [],
             "report_data": {}
@@ -28,7 +29,19 @@ class SessionManager:
             await self.redis.set_session(session_id, session)
         return session
 
+    async def set_session(self, session_id: str, session_data: dict):
+        """Menyimpan data session ke Redis"""
+        if not session_id:
+            raise ValueError("Session ID tidak boleh kosong")
+        
+        # Pastikan session_id ada dalam data
+        session_data["session_id"] = session_id
+        session_data["updated_at"] = datetime.now().isoformat()
+        
+        await self.redis.set_session(session_id, session_data)
+
     async def cleanup_sessions(self):
+        """Membersihkan session yang sudah expired"""
         # Redis akan otomatis membersihkan sesi yang expired
         pass
 
