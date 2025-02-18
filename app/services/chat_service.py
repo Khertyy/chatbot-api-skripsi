@@ -236,30 +236,100 @@ Selalu berikan respons yang membantu dan mendukung."""
             logger.info("Updating report data for field: %s with message: %s", current_field, message)
             
             if current_field:
-                if current_field == "violence_category":
-                    violence_category = self._detect_violence_category(message_lower)
-                    if violence_category:
-                        session["report_data"][current_field] = violence_category
-                        session["current_field"] = None
-                        logger.info("Updated violence category to: %s", violence_category)
-                        return
-                
                 cleaned_message = message.strip()
                 if len(cleaned_message) > 2:
+                    # Khusus untuk field nomor telepon
+                    if current_field in ["victim_phone", "reporter_phone"]:
+                        # Validasi nomor telepon
+                        is_valid, _ = self._validate_report_data({current_field: cleaned_message})
+                        if not is_valid:
+                            # Tetap di field yang sama dan minta input ulang
+                            logger.info(f"Invalid phone number for {current_field}: {cleaned_message}")
+                            return
+                    
                     session["report_data"][current_field] = cleaned_message
                     session["current_field"] = None
                     logger.info("Updated field %s with value: %s", current_field, cleaned_message)
                     
                     if self._is_report_complete(session["report_data"]):
-                        session["ready_to_submit"] = True
-                        logger.info("Report is complete and ready to submit")
+                        # Validasi seluruh data sebelum set ready_to_submit
+                        is_valid, _ = self._validate_report_data(session["report_data"])
+                        session["ready_to_submit"] = is_valid
+                        if is_valid:
+                            logger.info("Report is complete and valid, ready to submit")
+                        else:
+                            logger.info("Report is complete but has invalid data")
         except Exception as e:
             logger.exception("Error updating report data: %s", str(e))
 
     def _is_report_complete(self, report_data: dict) -> bool:
         return all(field in report_data for field in self.report_fields)
 
+    def _validate_report_data(self, report_data: dict) -> tuple[bool, list[str]]:
+        """Validasi data laporan dan return list field yang perlu diperbaiki"""
+        invalid_fields = []
+        
+        # Helper function untuk validasi nomor telepon
+        def is_valid_phone(phone: str) -> bool:
+            # Bersihkan string dari karakter non-digit
+            digits = ''.join(filter(str.isdigit, phone))
+            # Cek panjang minimal dan tidak boleh kosong/tidak ada
+            return len(digits) >= 10 and not any(skip in phone.lower() for skip in 
+                ["tidak", "ga", "gak", "tidak ada", "kosong", "tidak punya", "-"])
+
+        # Aturan validasi untuk setiap field
+        validation_rules = {
+            "victim_phone": is_valid_phone,
+            "reporter_phone": is_valid_phone,
+            "victim_age": lambda x: bool(re.search(r'\d+', x)),
+            "perpetrator_age": lambda x: bool(re.search(r'\d+', x)),
+            "victim_gender": lambda x: any(gender in x.lower() for gender in ["pria", "wanita", "laki", "perempuan"]),
+            "perpetrator_gender": lambda x: any(gender in x.lower() for gender in ["pria", "wanita", "laki", "perempuan"])
+        }
+
+        for field, rule in validation_rules.items():
+            if field in report_data and not rule(report_data[field]):
+                invalid_fields.append(field)
+                logger.warning(f"Invalid data for field {field}: {report_data[field]}")
+
+        return len(invalid_fields) == 0, invalid_fields
+
+    def _get_reask_message(self, invalid_fields: list[str]) -> str:
+        """Generate pesan untuk meminta ulang data yang tidak valid"""
+        field_messages = {
+            "victim_phone": """Nomor telepon korban sangat penting untuk koordinasi dan penanganan kasus. 
+Mohon berikan nomor telepon yang valid (minimal 10 digit). 
+Contoh format: 081234567890""",
+            "reporter_phone": """Sebagai pelapor, nomor telepon Anda WAJIB diisi untuk:
+1. Koordinasi penanganan kasus
+2. Pembaruan status laporan
+3. Informasi tindak lanjut
+
+Mohon berikan nomor telepon yang dapat dihubungi (minimal 10 digit).
+Contoh format: 081234567890""",
+            "victim_age": "Mohon berikan usia korban dalam bentuk angka, contoh: 15 tahun.",
+            "perpetrator_age": "Mohon berikan perkiraan usia pelaku dalam bentuk angka, contoh: 35 tahun.",
+            "victim_gender": "Mohon tentukan jenis kelamin korban (Pria/Wanita).",
+            "perpetrator_gender": "Mohon tentukan jenis kelamin pelaku (Pria/Wanita)."
+        }
+
+        messages = ["Untuk dapat memproses laporan Anda, mohon lengkapi informasi berikut:"]
+        for field in invalid_fields:
+            messages.append(f"\n{field_messages.get(field)}")
+        
+        if any(field in ["victim_phone", "reporter_phone"] for field in invalid_fields):
+            messages.append("\n⚠️ Nomor telepon wajib diisi untuk memastikan laporan dapat ditindaklanjuti dengan baik.")
+        
+        return "\n".join(messages)
+
     def _generate_short_confirmation(self, report_data: dict) -> str:
+        # Validasi data sebelum konfirmasi
+        is_valid, invalid_fields = self._validate_report_data(report_data)
+        
+        if not is_valid:
+            return self._get_reask_message(invalid_fields)
+        
+        # Jika valid, lanjutkan dengan konfirmasi normal
         important_fields = {
             "violence_category": "Jenis Kekerasan",
             "chronology": "Kronologi",
@@ -280,45 +350,32 @@ Selalu berikan respons yang membantu dan mendukung."""
 
     def _get_next_questions(self, session: dict) -> str:
         question_flow = [
-            ("violence_category", """Saya mengerti Anda ingin membuat laporan. Untuk membantu kami menangani kasus ini dengan tepat, mohon beritahu jenis kekerasan yang terjadi:
-
-- Kekerasan Fisik
-- Kekerasan Seksual
-- Kekerasan Psikis
-- Penelantaran
-- Trafficking"""),
-            ("victim_name", """Terima kasih atas informasinya. Untuk melanjutkan proses pelaporan, boleh saya tahu nama korban yang mengalami kekerasan? Kami akan menjaga kerahasiaan identitas dengan sangat baik. 🙏"""),
-            ("date", """Untuk membantu kami memahami kronologi kejadian dengan lebih baik, kapan kejadian ini terjadi? Anda bisa memberikan tanggal seperti contoh: 25/03/2024"""),
-            ("scene", """Kami juga perlu mengetahui lokasi kejadian untuk penanganan yang tepat. Boleh diceritakan di mana kejadian ini terjadi? Bisa disebutkan alamat lengkap atau daerahnya."""),
-            ("chronology", """Saya memahami ini mungkin sulit, tapi bisakah Anda menceritakan secara singkat bagaimana kejadian ini terjadi? Informasi ini sangat penting untuk membantu kami mengambil tindakan yang tepat."""),
-            ("victim_age", """Untuk memastikan penanganan yang sesuai, boleh saya tahu berapa usia korban saat ini?"""),
-            ("victim_gender", """Mohon beritahu jenis kelamin korban (Pria/Wanita). Informasi ini penting untuk penanganan kasus yang lebih tepat."""),
-            ("victim_phone", """Jika memungkinkan, boleh kami minta nomor telepon korban yang bisa dihubungi? Ini akan membantu kami untuk koordinasi lebih lanjut jika diperlukan."""),
-            ("victim_address", """Untuk keperluan pendampingan dan perlindungan, boleh kami tahu alamat tempat tinggal korban saat ini?"""),
-            ("victim_description", """Untuk membantu identifikasi, bisakah Anda memberikan deskripsi singkat tentang korban? Misalnya: ciri-ciri fisik atau hal khusus yang perlu kami ketahui."""),
-            ("perpetrator_name", """Jika Anda mengetahuinya, boleh beritahu nama pelaku dalam kejadian ini? Informasi ini akan sangat membantu proses penanganan kasus."""),
-            ("perpetrator_age", """Sejauh yang Anda ketahui, kira-kira berapa usia pelaku?"""),
-            ("perpetrator_gender", """Untuk melengkapi data, mohon beritahu jenis kelamin pelaku (Pria/Wanita)."""),
-            ("perpetrator_description", """Bisakah Anda memberikan deskripsi singkat tentang pelaku? Misalnya: ciri-ciri fisik, atau informasi lain yang bisa membantu identifikasi."""),
-            ("reporter_name", """Terima kasih atas kepedulian Anda dalam melaporkan kasus ini. Boleh kami tahu nama Anda sebagai pelapor?"""),
-            ("reporter_phone", """Agar kami bisa menghubungi Anda untuk informasi lebih lanjut, boleh kami minta nomor telepon yang bisa dihubungi?"""),
-            ("reporter_address", """Untuk keperluan administrasi, boleh kami tahu alamat tempat tinggal Anda saat ini?"""),
-            ("reporter_relationship_between", """Terakhir, boleh kami tahu apa hubungan Anda dengan korban? Ini akan membantu kami dalam proses penanganan kasus.
-
-- Keluarga
-- Tetangga
-- Teman
-- Saksi
-- Tidak Dikenal""")
+            ("violence_category", "Saya mengerti Anda ingin membuat laporan. Untuk membantu kami menangani kasus ini dengan tepat, mohon beritahu jenis kekerasan yang terjadi:\n\n- Kekerasan Fisik\n- Kekerasan Seksual\n- Kekerasan Psikis\n- Penelantaran\n- Trafficking"),
+            ("victim_name", "Terima kasih atas informasinya. Untuk melanjutkan proses pelaporan, boleh saya tahu nama korban yang mengalami kekerasan? Kami akan menjaga kerahasiaan identitas dengan sangat baik. 🙏"),
+            ("date", "Untuk membantu kami memahami kronologi kejadian dengan lebih baik, kapan kejadian ini terjadi? Anda bisa memberikan tanggal seperti contoh: 25/03/2024"),
+            ("scene", "Kami juga perlu mengetahui lokasi kejadian untuk penanganan yang tepat. Boleh diceritakan di mana kejadian ini terjadi? Bisa disebutkan alamat lengkap atau daerahnya."),
+            ("chronology", "Saya memahami ini mungkin sulit, tapi bisakah Anda menceritakan secara singkat bagaimana kejadian ini terjadi? Informasi ini sangat penting untuk membantu kami mengambil tindakan yang tepat."),
+            ("victim_age", "Untuk memastikan penanganan yang sesuai, boleh saya tahu berapa usia korban saat ini?"),
+            ("victim_gender", "Mohon beritahu jenis kelamin korban (Pria/Wanita). Informasi ini penting untuk penanganan kasus yang lebih tepat."),
+            ("victim_phone", "Jika memungkinkan, boleh kami minta nomor telepon korban yang bisa dihubungi? Ini akan membantu kami untuk koordinasi lebih lanjut jika diperlukan."),
+            ("victim_address", "Untuk keperluan pendampingan dan perlindungan, boleh kami tahu alamat tempat tinggal korban saat ini?"),
+            ("victim_description", "Untuk membantu identifikasi, bisakah Anda memberikan deskripsi singkat tentang korban? Misalnya: ciri-ciri fisik atau hal khusus yang perlu kami ketahui."),
+            ("perpetrator_name", "Jika Anda mengetahuinya, boleh beritahu nama pelaku dalam kejadian ini? Informasi ini akan sangat membantu proses penanganan kasus."),
+            ("perpetrator_age", "Sejauh yang Anda ketahui, kira-kira berapa usia pelaku?"),
+            ("perpetrator_gender", "Untuk melengkapi data, mohon beritahu jenis kelamin pelaku (Pria/Wanita)."),
+            ("perpetrator_description", "Bisakah Anda memberikan deskripsi singkat tentang pelaku? Misalnya: ciri-ciri fisik, atau informasi lain yang bisa membantu identifikasi."),
+            ("reporter_name", "Terima kasih atas kepedulian Anda dalam melaporkan kasus ini. Boleh kami tahu nama Anda sebagai pelapor?"),
+            ("reporter_phone", "Agar kami bisa menghubungi Anda untuk informasi lebih lanjut, boleh kami minta nomor telepon yang bisa dihubungi?"),
+            ("reporter_address", "Untuk keperluan administrasi, boleh kami tahu alamat tempat tinggal Anda saat ini?"),
+            ("reporter_relationship_between", "Terakhir, boleh kami tahu apa hubungan Anda dengan korban? Ini akan membantu kami dalam proses penanganan kasus.\n\n- Keluarga\n- Tetangga\n- Teman\n- Saksi\n- Tidak Dikenal")
         ]
 
         # Cari field yang belum terisi dan berikan pertanyaan berikutnya
         for field, question in question_flow:
             if field not in session["report_data"]:
-                session["current_field"] = field  # Tandai field yang sedang ditanyakan
+                session["current_field"] = field
                 return question
         
-        # Jika semua field sudah terisi
         return None
 
     def _clean_report_data(self, report_data: dict) -> dict:
