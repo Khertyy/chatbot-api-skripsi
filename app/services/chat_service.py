@@ -306,27 +306,59 @@ Selalu berikan respons yang membantu dan mendukung."""
     async def _submit_report(self, session: dict) -> ChatResponse:
         """Submit laporan ke endpoint backend"""
         try:
+            # Format data sesuai dengan format yang diharapkan
+            report_data = {
+                "violence_category": session["report_data"]["violence_category"].title(),
+                "chronology": session["report_data"]["chronology"],
+                "date": session["report_data"]["date"],
+                "scene": session["report_data"]["scene"],
+                "victim_name": session["report_data"]["victim_name"],
+                "victim_phone": session["report_data"]["victim_phone"],
+                "victim_address": session["report_data"]["victim_address"],
+                "victim_age": str(session["report_data"]["victim_age"]),
+                "victim_gender": session["report_data"]["victim_gender"].title(),
+                "victim_description": session["report_data"]["victim_description"],
+                "perpetrator_name": session["report_data"]["perpetrator_name"],
+                "perpetrator_age": str(session["report_data"]["perpetrator_age"]),
+                "perpetrator_gender": session["report_data"]["perpetrator_gender"].title(),
+                "perpetrator_description": session["report_data"]["perpetrator_description"],
+                "reporter_name": session["report_data"]["reporter_name"],
+                "reporter_phone": session["report_data"]["reporter_phone"],
+                "reporter_address": session["report_data"]["reporter_address"],
+                "reporter_relationship_between": session["report_data"]["reporter_relationship_between"].title()
+            }
+
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
+
             async with aiohttp.ClientSession() as http_session:
                 async with http_session.post(
                     f"{settings.base_api_url}/api/chatbot/report",
-                    json=session["report_data"]  # Menggunakan json= untuk mengirim JSON
+                    json=report_data,
+                    headers=headers,
+                    ssl=False  # Tambahkan ini jika ada masalah SSL
                 ) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        response_message = f"Laporan berhasil dibuat dengan nomor tiket: {result.get('ticket_number', 'N/A')}"
+                    response_data = await response.json()
+                    
+                    if response.status == 200 and response_data.get("success", False):
+                        response_message = f"Laporan berhasil dibuat dengan nomor tiket: {response_data.get('ticket_number', 'N/A')}"
                     else:
-                        response_message = "Maaf, terjadi kesalahan dalam pembuatan laporan. Silakan coba lagi nanti."
+                        error_detail = response_data.get("detail", "Unknown error")
+                        raise Exception(f"Error from server: {error_detail}")
 
                     return ChatResponse(
                         response=response_message,
-                        session_id=session["session_id"],
+                        session_id=session.get("session_id"),
                         next_steps=["Laporan telah selesai dibuat"],
                         requires_follow_up=False
                     )
         except Exception as e:
+            print(f"Error submitting report: {str(e)}")  # Untuk debugging
             return ChatResponse(
-                response=f"Terjadi kesalahan: {str(e)}",
-                session_id=session["session_id"],
+                response=f"Maaf, terjadi kesalahan dalam pembuatan laporan: {str(e)}. Silakan coba lagi nanti.",
+                session_id=session.get("session_id"),
                 next_steps=["Silakan coba lagi"],
                 requires_follow_up=True
             )
