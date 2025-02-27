@@ -11,8 +11,7 @@ class SessionManager:
         session_data = {
             "session_id": session_id,
             "created_at": datetime.now().isoformat(),
-            "history": [],
-            "report_data": {}
+            "history": []
         }
         
         await self.redis.set_session(session_id, session_data)
