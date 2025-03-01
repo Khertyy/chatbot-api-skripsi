@@ -1,0 +1,12 @@
+**/__pycache__
+**/.venv
+**/.env
+**/.git
+**/.vscode
+**/*.log
+Dockerfile
+docker-compose.yml
+README.md
+**/dataset.txt
+**/app.log
+**/tests 

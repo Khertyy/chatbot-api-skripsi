@@ -52,83 +52,124 @@ sudo systemctl status redis
 
 ## Instalasi
 
-1. Clone repository ini menggunakan HTTPS:
+### Prasyarat
+
+- Docker Desktop ([Download untuk Windows](https://www.docker.com/products/docker-desktop/))
+- Git ([Download](https://git-scm.com/))
+
+### Langkah-langkah Deployment dengan Docker
+
+1. Clone repository:
 
 ```bash
 git clone git@github.com:Khertyy/chatbot-api-skripsi.git
-```
-
-2. Masuk ke direktori proyek:
-
-```bash
 cd chatbot-api-skripsi
 ```
 
-3. Buat virtual environment:
+2. Buat file environment:
 
 ```bash
-python -m venv venv
+cp .env.example .env
 ```
 
-4. Aktifkan virtual environment:
-
-Untuk Windows:
-
-```bash
-venv\Scripts\activate
-```
-
-Untuk macOS/Linux:
-
-```bash
-source venv/bin/activate
-```
-
-5. Install dependensi:
-
-```bash
-pip install -r requirements.txt
-```
-
-## Konfigurasi
-
-1. Buat file `.env` di root direktori proyek
-2. Tambahkan konfigurasi berikut:
+Edit file `.env` dan isi nilai yang diperlukan:
 
 ```env
-GEMINI_API_KEY=your_gemini_api_key
-APP_ENV=development
-
-# Redis Configuration
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=
-REDIS_DB=0
-SESSION_TTL=86400
+GEMINI_API_KEY="your_api_key_here"
+REDIS_PASSWORD="your_secure_password_here"
 ```
+
+3. Build dan jalankan container:
+
+```bash
+docker-compose up --build
+```
+
+4. Aplikasi akan berjalan di:
+
+- API: http://localhost:8000
+- Redis: localhost:6379
+
+5. Untuk menghentikan:
+
+```bash
+docker-compose down
+```
+
+### Instalasi Redis di Windows
+
+1. **Menggunakan Docker (Direkomendasikan)**:
+
+   - Ikuti langkah deployment dengan Docker di atas
+   - Redis akan otomatis terinstall dalam container
+
+2. **Menggunakan WSL (Windows Subsystem for Linux)**:
+
+   ```bash
+   # Install WSL
+   wsl --install
+
+   # Install Ubuntu
+   wsl --install -d Ubuntu
+
+   # Di lingkungan Ubuntu:
+   sudo apt-get update
+   sudo apt-get install redis-server
+   sudo service redis-server start
+   ```
+
+3. **Windows Native (Tidak Direkomendasikan)**:
+   - Download Redis untuk Windows dari [Microsoft Archive](https://github.com/microsoftarchive/redis/releases)
+   - Ekstrak dan jalankan `redis-server.exe`
 
 ## Menjalankan Aplikasi
 
-1. Pastikan Redis server berjalan:
+### Metode 1: Menggunakan Docker (Direkomendasikan)
 
 ```bash
-# Cek status Redis
-brew services list  # untuk macOS
-systemctl status redis  # untuk Linux
-
-# Start Redis jika belum berjalan
-brew services start redis  # untuk macOS
-sudo systemctl start redis  # untuk Linux
+docker-compose up --build
 ```
 
-2. Pastikan virtual environment sudah aktif
-3. Jalankan server FastAPI:
+### Metode 2: Traditional Installation
 
 ```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Jalankan Redis (Linux/Mac/WSL)
+redis-server
+
+# Jalankan aplikasi
 uvicorn app.main:app --reload
 ```
 
-Server akan berjalan di `http://localhost:8000`
+## Verifikasi Instalasi
+
+1. Cek status container:
+
+```bash
+docker-compose ps
+```
+
+2. Test koneksi Redis:
+
+```bash
+docker exec -it chatbot-api-skripsi-redis-1 redis-cli -a your_secure_password_here PING
+# Harus merespon "PONG"
+```
+
+3. Akses dokumentasi API:
+
+- Swagger UI: http://localhost:8000/docs
+- Redoc: http://localhost:8000/redoc
+
+## Environment Variables
+
+| Variable       | Required | Default     | Description                       |
+| -------------- | -------- | ----------- | --------------------------------- |
+| GEMINI_API_KEY | Yes      | -           | API key untuk Google Gemini       |
+| REDIS_PASSWORD | No       | ""          | Password untuk koneksi Redis      |
+| APP_ENV        | No       | development | Environment aplikasi (production) |
 
 ## Monitoring Redis
 
