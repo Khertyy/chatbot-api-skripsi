@@ -1,15 +1,16 @@
 from pydantic_settings import BaseSettings
+from typing import Optional
 
 class Settings(BaseSettings):
     gemini_api_key: str
     base_api_url: str = "https://dpppa-sulutprov.support"  # Base URL saja
     app_env: str = "development"
-    api_rate_limit: str | None = None
+    api_rate_limit: Optional[str] = None
     
     # Redis settings
     redis_host: str = "localhost"
     redis_port: int = 6379
-    redis_password: str | None = None
+    redis_password: Optional[str] = None
     redis_db: int = 0
     session_ttl: int = 86400  # 24 hours in seconds
     
