@@ -1,189 +1,203 @@
-# Panduan Deployment Chatbot API SIPPAT
+# Panduan Deployment Docker untuk Chatbot API SIPPAT
 
-Dokumen ini menjelaskan langkah-langkah deployment aplikasi Chatbot API untuk sistem SIPPAT DP3A Sulut.
+Dokumen ini menjelaskan langkah-langkah deployment aplikasi Chatbot API untuk sistem SIPPAT DP3A Sulut menggunakan Docker dan Docker Compose.
 
-## 1. Persiapan Server
+## 1. Prasyarat
 
-```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y python3-pip python3-venv git
-```
+- Docker dan Docker Compose sudah terinstall di server
+- Git sudah terinstall
 
-**Penjelasan:**
+Jika belum terinstall, silakan install Docker terlebih dahulu menggunakan panduan resmi Docker untuk sistem operasi Anda.
 
-- Update paket sistem untuk memastikan keamanan dan kompatibilitas
-- Install dependency dasar:
-  - `python3-pip`: Package manager Python
-  - `python3-venv`: Virtual environment Python
-  - `git`: Version control system
-
-## 2. Install dan Konfigurasi Redis
+## 2. Persiapan Proyek
 
 ```bash
-sudo apt install -y redis-server
-sudo nano /etc/redis/redis.conf
-```
+# Clone repository (asumsikan baru saja melakukan clone)
+git clone https://github.com/username/chatbot-api-skripsi.git
+cd chatbot-api-skripsi
 
-**Parameter penting di redis.conf:**
-
-```ini
-maxmemory 256mb           # Batas memori untuk prevent memory leak
-maxmemory-policy allkeys-lru  # Strategi penghapusan data saat memori penuh
-requirepass your_secure_password  # Sesuai dengan REDIS_PASSWORD di .env
-bind 127.0.0.1            # Hanya izinkan akses lokal
-```
-
-```bash
-sudo systemctl restart redis
-sudo systemctl enable redis
-```
-
-**Alasan Konfigurasi:**
-
-- Membatasi penggunaan memori untuk mencegah overutilization
-- Autentikasi password meningkatkan keamanan
-- Binding lokal mengurangi exposure ke jaringan publik
-
-## 3. Setup Aplikasi
-
-```bash
-cd ~/chatbot-api-skripsi
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+# Buat file .env dari contoh
 cp .env.example .env
 nano .env
 ```
 
-**Isi .env yang penting:**
+## 3. Konfigurasi Environment
+
+Isi file `.env` dengan konfigurasi berikut:
 
 ```ini
+# API Configuration
 APP_ENV=production
-GEMINI_API_KEY="your_api_key"
-REDIS_HOST="localhost"
-REDIS_PASSWORD="your_redis_password"
-REDIS_DB=0
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# Redis Configuration
+REDIS_PASSWORD=strong_password_here
 ```
 
-**Best Practices:**
+**Penting:** Gunakan password Redis yang kuat dan API key yang valid untuk Gemini API.
 
-- Gunakan environment terpisah untuk development/production
-- Simpan secret key di environment variables, bukan di codebase
-- Jangan commit file .env ke version control
-
-## 4. Systemd Service Setup
-
-Buat file `/etc/systemd/system/chatbot-api.service`:
-
-```ini
-[Unit]
-Description=SIPPAT Chatbot API Service
-After=network.target
-
-[Service]
-User=ubuntu
-Group=www-data
-WorkingDirectory=/home/ubuntu/chatbot-api-skripsi
-Environment="PATH=/home/ubuntu/chatbot-api-skripsi/venv/bin"
-ExecStart=/home/ubuntu/chatbot-api-skripsi/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-**Aktifkan service:**
+## 4. Build dan Jalankan dengan Docker Compose
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl start chatbot-api
-sudo systemctl enable chatbot-api
+# Build dan jalankan container dalam mode detached
+sudo docker compose up --build -d
+
+# Verifikasi container berjalan
+sudo docker compose ps
 ```
 
-**Keuntungan Systemd:**
+**Penjelasan:**
 
-- Auto-restart saat crash
-- Log management terintegrasi
-- Kemampuan berjalan di background
-- Mudah monitoring dengan `journalctl`
+- Flag `--build` memastikan image dibangun ulang jika ada perubahan
+- Flag `-d` menjalankan container di background (detached mode)
 
-## 5. Konfigurasi Keamanan
+## 5. Konfigurasi Firewall (UFW)
 
 ```bash
-sudo ufw allow 8000
-sudo ufw allow 22
+# Buka port 8000 untuk API
+sudo ufw allow 8000/tcp
+
+# Pastikan SSH tetap bisa diakses
+sudo ufw allow ssh
+
+# Aktifkan firewall jika belum aktif
 sudo ufw enable
+
+# Verifikasi status firewall
+sudo ufw status
 ```
 
-**Pertimbangan Keamanan:**
+**Keamanan Tambahan:**
 
-- Hanya buka port yang diperlukan
-- Pertimbangkan reverse proxy dengan Nginx/Apache
-- Gunakan HTTPS dengan Let's Encrypt
-- Batasi akses Redis hanya dari localhost
+- Idealnya, gunakan reverse proxy seperti Nginx untuk mengekspos API ke internet
+- Jika perlu, batasi akses berdasarkan IP dengan: `sudo ufw allow from your_ip_address to any port 8000`
 
 ## 6. Verifikasi Deployment
 
 ```bash
-# Cek status service
-sudo systemctl status chatbot-api
+# Cek container logs
+sudo docker compose logs -f
 
 # Test API endpoint
 curl -X POST http://localhost:8000/api/v1/chatbot/chat \
   -H "Content-Type: application/json" \
   -d '{"message":"Halo"}'
 
-# Cek koneksi Redis
-redis-cli -a your_redis_password PING
+# Cek Redis container
+sudo docker compose exec redis redis-cli -a ${REDIS_PASSWORD} PING
 ```
 
-## 7. Maintenance Rutin
+## 7. Manajemen Deployment
 
-**Backup Strategy:**
-
-1. **Redis:**
-   ```bash
-   redis-cli SAVE
-   cp /var/lib/redis/dump.rdb /path/to/backup
-   ```
-2. **Codebase:** Lakukan git pull secara berkala
-3. **Environment:** Simpan salinan .env di tempat aman
-
-**Update Aplikasi:**
+### Update Aplikasi
 
 ```bash
+# Pull perubahan terbaru
 git pull origin main
-source venv/bin/activate
-pip install -r requirements.txt
-sudo systemctl restart chatbot-api
+
+# Rebuild dan restart container
+sudo docker compose down
+sudo docker compose up --build -d
 ```
 
-## Troubleshooting Umum
-
-**Masalah: API tidak merespon**
+### Backup Data Redis
 
 ```bash
-# Cek log aplikasi
-journalctl -u chatbot-api -f
+# Buat direktori backup
+mkdir -p ~/backups/redis
 
-# Cek koneksi Redis
-redis-cli -a your_password INFO clients
+# Backup data Redis
+sudo docker compose exec redis redis-cli -a ${REDIS_PASSWORD} SAVE
+sudo docker cp chatbot-api-skripsi-redis-1:/data/dump.rdb ~/backups/redis/dump.rdb.$(date +%Y%m%d)
 ```
 
-**Masalah: Memory Usage Tinggi**
+### Restart Service
 
 ```bash
-# Identifikasi proses
-top -o %MEM
+# Restart semua service
+sudo docker compose restart
 
-# Flush Redis cache
-redis-cli -a your_password FLUSHALL
+# Restart service tertentu
+sudo docker compose restart web
 ```
 
-## Rekomendasi Production
+## 8. Monitoring & Logging
 
-1. **Load Balancing:** Gunakan Nginx sebagai reverse proxy
-2. **Monitoring:** Implementasi Prometheus + Grafana
-3. **Log Rotation:** Setup logrotate untuk log aplikasi
-4. **Auto Deployment:** CI/CD pipeline dengan GitHub Actions
-5. **Database Persistence:** Pertimbangkan backup harian Redis
+```bash
+# Lihat logs dari semua container
+sudo docker compose logs
+
+# Lihat logs dari container FastAPI
+sudo docker compose logs web
+
+# Lihat logs realtime
+sudo docker compose logs -f web
+
+# Cek resource usage
+sudo docker stats
+```
+
+## 9. Troubleshooting Umum
+
+### Masalah: Container tidak berjalan
+
+```bash
+# Cek status container
+sudo docker compose ps
+
+# Lihat logs untuk error
+sudo docker compose logs
+
+# Restart container
+sudo docker compose down
+sudo docker compose up -d
+```
+
+### Masalah: Redis Error
+
+```bash
+# Periksa logs Redis
+sudo docker compose logs redis
+
+# Pastikan variabel REDIS_PASSWORD ada di .env dan format command redis-server benar
+# Coba masuk ke container Redis
+sudo docker compose exec redis sh
+redis-cli -a ${REDIS_PASSWORD} PING
+```
+
+### Masalah: API Error
+
+```bash
+# Periksa logs API
+sudo docker compose logs web
+
+# Pastikan konfigurasi .env benar
+# Coba restart container
+sudo docker compose restart web
+```
+
+## 10. Penanganan Maintenance
+
+```bash
+# Maintenance tanpa downtime (saat update minor)
+sudo docker compose up -d --no-deps --build web
+
+# Maintenance dengan downtime
+sudo docker compose down
+# Lakukan perubahan yang diperlukan
+sudo docker compose up -d
+```
+
+## 11. Rekomendasi Production
+
+1. **Container Registry**: Gunakan private registry untuk image Docker
+2. **Health Checks**: Tambahkan health check di docker-compose.yml
+3. **Reverse Proxy**: Gunakan Nginx sebagai reverse proxy dengan HTTPS
+4. **Persistent Volumes**: Pastikan volume Redis dikonfigurasi dengan benar
+5. **CI/CD Pipeline**: Otomatisasi deployment dengan GitHub Actions
+6. **Monitoring**: Integrasikan dengan Prometheus dan Grafana untuk monitoring
+7. **Secrets Management**: Gunakan Docker Secrets untuk menyimpan kredensial
+
+---
+
+Dengan mengikuti panduan ini, aplikasi FastAPI Chatbot API akan berjalan dengan Docker di server production dengan konfigurasi yang aman dan efisien.
